@@ -67,6 +67,13 @@ class ModelArguments:
         default=False,
         metadata={"help": "Whether to apply incremental training."},
     )
+    ignore_pretraining_alignment_heads: bool = field(
+        default=False,
+        metadata={
+            "help": "Load the action/VLM body while intentionally omitting pretrained "
+            "depth/video distillation heads for action-only post-training."
+        },
+    )
     adanorm_time: Optional[bool] = field(
         default=False,
         metadata={"help": "Whether to apply extra time embed to ada_norm in expert."},

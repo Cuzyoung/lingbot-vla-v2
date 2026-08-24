@@ -188,6 +188,7 @@ class VLADataset(Dataset):
             self.feature_transform = FeatureTransform(robot_config, dataset_config, self.config, \
                         processor, disabled_image_features, do_nomalize, \
                         chunk_size=chunk_size, return_item_befor_padding=return_item,\
+                        norm_stats_path=getattr(dataset_config, "norm_stats_file", None),
                         image_augment=image_augment, use_depth_align=use_depth_align,
                         use_future_image=use_future_image)
         else:
@@ -209,6 +210,7 @@ class VLADataset(Dataset):
             repo_id=repo_id,
             image_transforms=Resize(image_size),
             delta_timestamps=merged_delta,
+            video_backend=video_backend,
             load_image=load_image
         )
 

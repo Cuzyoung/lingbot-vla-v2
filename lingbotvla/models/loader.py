@@ -141,7 +141,18 @@ class CustomizedModelingLoader(BaseModelLoader):
                         model = self.model_cls._from_config(**init_kwargs)
 
             if not empty_init:
-                load_model_weights(model, weights_path, init_device, load_vlm_only=load_vlm_only, post_training=post_training, incremental_training=incremental_training, adanorm_time=adanorm_time)
+                load_model_weights(
+                    model,
+                    weights_path,
+                    init_device,
+                    load_vlm_only=load_vlm_only,
+                    post_training=post_training,
+                    incremental_training=incremental_training,
+                    adanorm_time=adanorm_time,
+                    ignore_pretraining_alignment_heads=getattr(
+                        model.config, "ignore_pretraining_alignment_heads", False
+                    ),
+                )
 
             # we should tie embeddings after loading weights because init_empty_weights() leads to untied weights,
             if getattr(model.config, "tie_word_embeddings", True):

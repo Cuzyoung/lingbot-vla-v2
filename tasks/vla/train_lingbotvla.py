@@ -310,6 +310,10 @@ class MyDataArguments(DataArguments):
         default=None,
         metadata={"help": "Path to the normalization stats file."},
     )
+    video_backend: str = field(
+        default="pyav",
+        metadata={"help": "Video decoding backend. Use pyav on cluster images without system FFmpeg libraries for TorchCodec."},
+    )
     prompt_type: Literal["global", "subtask"] = field(
         default="global",
         metadata={"help": "Type of the prompt."},

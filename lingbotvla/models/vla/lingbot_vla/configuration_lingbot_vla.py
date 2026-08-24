@@ -44,6 +44,7 @@ class LingbotVLAConfig(PretrainedConfig):
         freeze_vision_encoder: bool = False,
 
         incremental_training: bool = False,
+        ignore_pretraining_alignment_heads: bool = False,
         depth_incremental_training: bool = False,
         reinit_mismatched_weights: bool = False,
 
@@ -119,6 +120,7 @@ class LingbotVLAConfig(PretrainedConfig):
         self.enable_expert_vision = enable_expert_vision
         self.expert_vision_type = expert_vision_type
         self.incremental_training = incremental_training
+        self.ignore_pretraining_alignment_heads = ignore_pretraining_alignment_heads
         self.depth_incremental_training = depth_incremental_training
         self.reinit_mismatched_weights = reinit_mismatched_weights
         self.norm_qkv = norm_qkv

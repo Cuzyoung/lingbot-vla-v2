@@ -227,6 +227,7 @@ def load_model_weights(
     post_training: bool = False,
     incremental_training: bool = False,
     adanorm_time: bool = False,
+    ignore_pretraining_alignment_heads: bool = False,
 ) -> None:
     """
     Loads pre-trained model states in transformers' format.
@@ -269,6 +270,20 @@ def load_model_weights(
                     parameter_names.remove(name)
                     _dispatch_parameter(model, name, tensor, dtensor_factory)
             else:
+                alignment_prefixes = (
+                    "model.current_shared_task_proj.",
+                    "model.current_video_align_",
+                    "model.depth_align_",
+                    "model.future_depth_align_",
+                    "model.future_shared_task_proj.",
+                    "model.future_video_align_",
+                )
+                if ignore_pretraining_alignment_heads and name.startswith(alignment_prefixes):
+                    logger.info_rank0(
+                        f"Skipping pretrained distillation-only parameter during "
+                        f"action-only post-training: {name}"
+                    )
+                    continue
                 if post_training:
                     error_msg = f"Unexpected key '{name}' found in state dict during Post-Training. This is not allowed!!!"
                     logger.info_rank0(error_msg)
