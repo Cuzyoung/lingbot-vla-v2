@@ -120,6 +120,10 @@ class FeatureTransform:
             'action_is_pad',
             'task',
         ])
+        # Observation features in this set are loaded only as anchors for
+        # constructing relative action targets. They are deliberately excluded
+        # from the proprioceptive state passed to the model.
+        self.action_reference_states = set()
 
         target_features  = {'states':[], 'actions':[], 'images':[]}
         org_features  = {'states':set(), 'actions':set(), 'images':set()}
@@ -184,6 +188,9 @@ class FeatureTransform:
                     assert isinstance(feature_convert_info, dict) or isinstance(feature_convert_info, str)
                     if isinstance(feature_convert_info, dict):
                         state_feature = list(feature_convert_info.keys())[0]
+                        model_input = feature_convert_info[state_feature].get('model_input', True)
+                        if not isinstance(model_input, bool):
+                            raise ValueError("state model_input must be a boolean")
                     else: 
                         state_feature = feature_convert_info
                     state_feature = state_feature.split('observation.state.')[-1]
@@ -218,7 +225,13 @@ class FeatureTransform:
                     
                 elif isinstance(feature_convert_info, dict):
                     target_feature = next(iter(feature_convert_info.keys()))
-                    target_features[feature_category].append(target_feature)
+                    model_input = True
+                    if feature_category == 'states':
+                        model_input = feature_convert_info[target_feature].pop('model_input', True)
+                        if not model_input:
+                            self.action_reference_states.add(target_feature)
+                    if model_input:
+                        target_features[feature_category].append(target_feature)
 
                     if feature_category == 'actions':
                         assert isinstance(feature_convert_info, dict)
@@ -396,6 +409,9 @@ class FeatureTransform:
                     )
                 else:
                     item[action_feature] -= item[state_feature]
+
+        for state_feature in self.action_reference_states:
+            item.pop(state_feature, None)
 
         if self.normalizer is not None:
             item = self.normalizer.normalize(item)

@@ -95,6 +95,19 @@ robotwin /path/to/lerobot_dataset
 
 `states` maps raw observation keys to unified state features. Multiple slices from the same raw tensor are concatenated in order.
 
+For a state that is needed only to construct a relative action target, set
+`model_input: false`. The loader will read that state and use it during
+`subtract_state`, but will not concatenate it into the proprioceptive state
+given to the model. This is useful when supervising an EEF action alongside a
+joint-only model input.
+
+```yaml
+states:
+  - observation.state.end.position:
+      origin_keys: observation.state.end.position
+      model_input: false
+```
+
 Current RoboTwin state mapping:
 
 ```yaml
@@ -227,7 +240,12 @@ Rules:
 
 For example, if `configs/vla/robotwin/robotwin.yaml` declares `joints: [{arm.position: 14}, {end.position: 14}, {effector.position: 2}]` and `cameras: [camera_top, camera_wrist_left, camera_wrist_right]`, then only these joint types and camera names are valid in the robot config. Using an undefined joint type or camera name will raise a `ValueError` at runtime.
 
-> **Note:** You can define additional joint types beyond `arm.position` and `effector.position` by adding new entries to `data.joints`. If you add end-effector (EEF) dimensions, we recommend learning **absolute action** (`subtract_state: False`), as relative rotation computation is not currently supported.
+> **Note:** You can define additional joint types beyond `arm.position` and
+> `effector.position` by adding new entries to `data.joints`. Absolute EEF
+> actions use `subtract_state: false`. Relative quaternion EEF actions use
+> `subtract_state: true` together with `relative_type: quaternion_world` or
+> `relative_type: quaternion_local`; both state and action must use
+> `xyz + quaternion(xyzw)` ordering.
 
 ## 4. Compute Normalization Statistics
 
