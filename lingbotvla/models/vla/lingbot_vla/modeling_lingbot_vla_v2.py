@@ -360,6 +360,10 @@ class QwenvlWithExpertV2Model(PreTrainedModel):
                 use_cache=use_cache,
                 fill_kv_cache=fill_kv_cache,
             )
+            capture = getattr(self, "_action_attention_capture", None)
+            if capture is not None and not fill_kv_cache:
+                capture(query_states.transpose(1, 2), key_states.transpose(1, 2),
+                        attention_mask[:, None])
             if self.config.attention_implementation == "flex_cached":
                 if layer_idx == 0:
                     _full_len = query_states.shape[1]
