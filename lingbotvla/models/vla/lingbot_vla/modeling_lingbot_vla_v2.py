@@ -320,11 +320,13 @@ class QwenvlWithExpertV2Model(PreTrainedModel):
         ada_cond: List[torch.FloatTensor] = None,
         visual_pos_masks: Optional[torch.Tensor] = None,
         deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
+        action_attention_horizon: int = 0,
     ):
         models = [self.qwenvl.model.language_model, self.qwen_expert.model]
         num_layers = self.qwenvl.config.text_config.num_hidden_layers
         action_num_layers = self.config.qwen_expert_config.num_hidden_layers
         router_logits_list = []
+        action_attention_sum = None
 
         assert action_num_layers == num_layers, (
             "Action expert and VLM must have the same number of layers "
@@ -360,6 +362,21 @@ class QwenvlWithExpertV2Model(PreTrainedModel):
                 use_cache=use_cache,
                 fill_kv_cache=fill_kv_cache,
             )
+            if action_attention_horizon:
+                # Return a tensor instead of mutating a Python capture hook. The
+                # boolean/horizon is static per compiled forward specialization.
+                h = action_attention_horizon
+                q = query_states[:, -h:].transpose(1, 2).float()
+                k = key_states.transpose(1, 2).float()
+                if q.shape[1] != k.shape[1]:
+                    k = k.repeat_interleave(q.shape[1] // k.shape[1], dim=1)
+                logits = q @ k.transpose(-1, -2) / q.shape[-1] ** 0.5
+                mask = attention_mask[:, None, -h:, :]
+                logits = (logits.masked_fill(~mask, float("-inf"))
+                          if mask.dtype == torch.bool else logits + mask)
+                matrix = logits.softmax(-1)[..., -h:].mean(dim=(0, 1)).detach()
+                action_attention_sum = (matrix if action_attention_sum is None
+                                        else action_attention_sum + matrix)
             capture = getattr(self, "_action_attention_capture", None)
             if capture is not None and not fill_kv_cache:
                 capture(query_states.transpose(1, 2), key_states.transpose(1, 2),
@@ -415,7 +432,10 @@ class QwenvlWithExpertV2Model(PreTrainedModel):
                 outputs_embeds.append(out_emb)
             else:
                 outputs_embeds.append(models[i].norm(hidden_states))
-        return outputs_embeds, past_key_values, router_logits_list
+        result = (outputs_embeds, past_key_values, router_logits_list)
+        if action_attention_horizon:
+            return (*result, action_attention_sum / num_layers)
+        return result
 
     def get_attention_interface(self):
         if self.config.attention_implementation == "flex":
@@ -976,17 +996,7 @@ class FlowMatchingV2(FlowMatchingV1):
         x_t = noise
         time = torch.tensor(1.0, dtype=dtype, device=device)
         count = 0
-        predict_velocity_fn = self.predict_velocity
-        if getattr(self, "_use_compile_predict_velocity", False):
-            predict_velocity_fn = getattr(self, "_compiled_predict_velocity", None)
-            if predict_velocity_fn is None:
-                predict_velocity_fn = torch.compile(
-                    self.predict_velocity,
-                    fullgraph=False,
-                    dynamic=False,
-                    options={"triton.cudagraphs": False},
-                )
-                self._compiled_predict_velocity = predict_velocity_fn
+        predict_velocity_fn = self.get_predict_velocity_fn()
 
         while time >= -dt / 2:
             count += 1
@@ -1005,6 +1015,19 @@ class FlowMatchingV2(FlowMatchingV1):
         print(f"Denoise {count} steps")
         return x_t
 
+    def get_predict_velocity_fn(self):
+        """Share the native predictor and its compile cache across samplers."""
+        if not getattr(self, "_use_compile_predict_velocity", False):
+            return self.predict_velocity
+        fn = getattr(self, "_compiled_predict_velocity", None)
+        if fn is None:
+            fn = torch.compile(
+                self.predict_velocity, fullgraph=False, dynamic=False,
+                options={"triton.cudagraphs": False},
+            )
+            self._compiled_predict_velocity = fn
+        return fn
+
     def predict_velocity(
         self,
         state,
@@ -1013,6 +1036,7 @@ class FlowMatchingV2(FlowMatchingV1):
         x_t,
         timestep,
         prefix_position_ids=None,
+        return_action_attention: bool = False,
     ):
         """Predict velocity at time t using cached Qwen3-VL prefix states."""
         if prefix_position_ids is None:
@@ -1055,7 +1079,7 @@ class FlowMatchingV2(FlowMatchingV1):
         )
         position_ids = full_position_ids[:, :, -suffix_len:]
 
-        outputs_embeds, _, _ = self.qwenvl_with_expert.forward(
+        prediction = self.qwenvl_with_expert.forward(
             attention_mask=full_att_2d_masks,
             position_ids=position_ids,
             past_key_values=past_key_values,
@@ -1063,7 +1087,9 @@ class FlowMatchingV2(FlowMatchingV1):
             use_cache=self.config.use_cache,
             fill_kv_cache=False,
             ada_cond=time_embs if getattr(self.config, "adanorm_time", False) else None,
+            action_attention_horizon=self.config.n_action_steps if return_action_attention else 0,
         )
+        outputs_embeds = prediction[0]
         suffix_out = outputs_embeds[1]
         suffix_out = suffix_out[:, -self.config.n_action_steps :]
         if getattr(self.config, "action_fp32", False):
@@ -1072,7 +1098,7 @@ class FlowMatchingV2(FlowMatchingV1):
             if suffix_out.dtype != self.action_out_proj.weight.dtype:
                 suffix_out = suffix_out.to(self.action_out_proj.weight.dtype)
             v_t = self.action_out_proj(suffix_out)
-        return v_t
+        return (v_t, prediction[3]) if return_action_attention else v_t
 
     def _moe_losses_and_metrics(self, router_logits_list, losses):
         router_z_loss_coeff = getattr(self.config, "router_z_loss_coeff", 0)
