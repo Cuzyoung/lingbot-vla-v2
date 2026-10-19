@@ -1017,7 +1017,8 @@ class FlowMatchingV2(FlowMatchingV1):
 
     def get_predict_velocity_fn(self):
         """Share the native predictor and its compile cache across samplers."""
-        if not getattr(self, "_use_compile_predict_velocity", False):
+        if (not getattr(self, "_use_compile_predict_velocity", False)
+                or torch.compiler.is_compiling()):
             return self.predict_velocity
         fn = getattr(self, "_compiled_predict_velocity", None)
         if fn is None:
